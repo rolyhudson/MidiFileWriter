@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "WeatherDrums": {
+      "commandName": "Project",
+      "commandLineArgs": " --melody -lat 53.350140 -lon -6.266155"
+    }
+  }
+}
