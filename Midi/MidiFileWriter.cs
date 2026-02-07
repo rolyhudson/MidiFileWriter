@@ -7,7 +7,8 @@ using WeatherDrums.Models;
 namespace WeatherDrums.Midi;
 
 /// <summary>
-/// Writes drum and melody patterns to MIDI files using DryWetMIDI
+/// Writes MIDI patterns to files using DryWetMIDI.
+/// Supports any pattern type implementing IMidiPattern.
 /// </summary>
 public class MidiFileWriter
 {
@@ -17,123 +18,139 @@ public class MidiFileWriter
     public int Tempo { get; set; } = 120;
 
     /// <summary>
-    /// MIDI program number for melody instrument (General MIDI)
-    /// Default: 89 = Pad 2 (warm) - good for ambient
-    /// Other options: 49 = Strings, 91 = Pad 4 (choir), 95 = Pad 8 (sweep)
+    /// Ticks per quarter note (standard MIDI resolution)
     /// </summary>
-    public int MelodyInstrument { get; set; } = 89;
+    public int TicksPerQuarterNote { get; set; } = WeatherToDrumMapper.TicksPerQuarterNote;
 
     /// <summary>
-    /// MIDI channel for melody (0-15, default 0 = channel 1)
+    /// Creates a MIDI file from one or more tracks and saves it to disk
     /// </summary>
-    public int MelodyChannel { get; set; } = 0;
-
-    /// <summary>
-    /// MIDI channel for drums (standard is channel 10, which is index 9)
-    /// </summary>
-    private const int DrumChannel = 9;
-
-    /// <summary>
-    /// Creates a MIDI file from drum patterns only and saves it to disk
-    /// </summary>
-    /// <param name="drumPatterns">List of drum patterns to write</param>
     /// <param name="outputPath">Path for the output MIDI file</param>
-    public void WriteToFile(List<DrumPattern> drumPatterns, string outputPath)
+    /// <param name="tracks">One or more MidiTrack objects to write</param>
+    public void WriteToFile(string outputPath, params MidiTrack[] tracks)
     {
-        WriteToFile(drumPatterns, null, outputPath);
-    }
-
-    /// <summary>
-    /// Creates a MIDI file from drum and melody patterns and saves it to disk
-    /// </summary>
-    /// <param name="drumPatterns">List of drum patterns to write</param>
-    /// <param name="melodyPatterns">Optional list of melody patterns to write</param>
-    /// <param name="outputPath">Path for the output MIDI file</param>
-    public void WriteToFile(List<DrumPattern> drumPatterns, List<MelodyPattern>? melodyPatterns, string outputPath)
-    {
-        Console.WriteLine($"Creating MIDI file at {outputPath}...");
-        Console.WriteLine($"Tempo: {Tempo} BPM");
-        Console.WriteLine($"Drum patterns: {drumPatterns.Count} bars");
-        if (melodyPatterns != null)
+        if (tracks.Length == 0)
         {
-            Console.WriteLine($"Melody patterns: {melodyPatterns.Count} bars");
+            throw new ArgumentException("At least one track is required", nameof(tracks));
         }
 
+        Console.WriteLine($"Creating MIDI file at {outputPath}...");
+        Console.WriteLine($"Tempo: {Tempo} BPM");
+        Console.WriteLine($"Tracks: {tracks.Length}");
+
         // Set the time division (ticks per quarter note)
-        var timeDivision = new TicksPerQuarterNoteTimeDivision((short)WeatherToDrumMapper.TicksPerQuarterNote);
+        var timeDivision = new TicksPerQuarterNoteTimeDivision((short)TicksPerQuarterNote);
         var midiFile = new MidiFile { TimeDivision = timeDivision };
-        
-        // Create drum track
-        var drumTrack = new TrackChunk();
-        drumTrack.Events.Add(new SequenceTrackNameEvent("Weather Drums"));
-        
-        // Add tempo event to drum track (microseconds per quarter note)
-        var microsecondsPerBeat = 60_000_000 / Tempo;
-        drumTrack.Events.Add(new SetTempoEvent(microsecondsPerBeat));
-        
-        midiFile.Chunks.Add(drumTrack);
 
-        // Add drum notes
-        var drumNoteCount = AddDrumNotesToTrack(drumTrack, drumPatterns);
+        int totalNotes = 0;
+        long maxTicks = 0;
+        bool tempoSet = false;
 
-        // Create melody track if patterns provided
-        int melodyNoteCount = 0;
-        if (melodyPatterns != null && melodyPatterns.Count > 0)
+        foreach (var track in tracks)
         {
-            var melodyTrack = new TrackChunk();
-            melodyTrack.Events.Add(new SequenceTrackNameEvent("Weather Melody"));
+            var trackChunk = new TrackChunk();
             
-            // Set the instrument for the melody channel (Program Change event)
-            // This tells the MIDI player what sound to use
-            melodyTrack.Events.Add(new ProgramChangeEvent((SevenBitNumber)MelodyInstrument)
-            {
-                Channel = (FourBitNumber)MelodyChannel
-            });
-            
-            midiFile.Chunks.Add(melodyTrack);
+            // Add track name
+            trackChunk.Events.Add(new SequenceTrackNameEvent(track.Name));
 
-            melodyNoteCount = AddMelodyNotesToTrack(melodyTrack, melodyPatterns);
-            
-            Console.WriteLine($"Melody instrument: {MelodyInstrument} (GM Pad) on channel {MelodyChannel + 1}");
+            // Add tempo event to the first track only
+            if (!tempoSet)
+            {
+                var microsecondsPerBeat = 60_000_000 / Tempo;
+                trackChunk.Events.Add(new SetTempoEvent(microsecondsPerBeat));
+                tempoSet = true;
+            }
+
+            // Add program change for non-drum tracks
+            if (track.Instrument.HasValue && track.Channel != 9)
+            {
+                trackChunk.Events.Add(new ProgramChangeEvent((SevenBitNumber)track.Instrument.Value)
+                {
+                    Channel = (FourBitNumber)track.Channel
+                });
+                Console.WriteLine($"  {track.Name}: Channel {track.Channel + 1}, Instrument {track.Instrument.Value}");
+            }
+            else
+            {
+                Console.WriteLine($"  {track.Name}: Channel {track.Channel + 1} (drums)");
+            }
+
+            midiFile.Chunks.Add(trackChunk);
+
+            // Add notes from all patterns
+            var (noteCount, trackTicks) = AddNotesToTrack(trackChunk, track);
+            totalNotes += noteCount;
+            maxTicks = Math.Max(maxTicks, trackTicks);
+
+            Console.WriteLine($"    Patterns: {track.Patterns.Count}, Notes: {noteCount}");
         }
 
         // Write to file
         midiFile.Write(outputPath, overwriteFile: true);
 
         // Calculate duration
-        var totalTicks = drumPatterns.Sum(p => p.LengthTicks);
-        var totalBeats = totalTicks / WeatherToDrumMapper.TicksPerQuarterNote;
+        var totalBeats = maxTicks / TicksPerQuarterNote;
         var durationSeconds = totalBeats * 60.0 / Tempo;
         var duration = TimeSpan.FromSeconds(durationSeconds);
 
         Console.WriteLine($"MIDI file created successfully!");
         Console.WriteLine($"Duration: {duration:mm\\:ss}");
-        Console.WriteLine($"Drum notes: {drumNoteCount}");
-        if (melodyPatterns != null)
-        {
-            Console.WriteLine($"Melody notes: {melodyNoteCount}");
-            Console.WriteLine($"Total notes: {drumNoteCount + melodyNoteCount}");
-        }
+        Console.WriteLine($"Total notes: {totalNotes}");
     }
 
-    private int AddDrumNotesToTrack(TrackChunk trackChunk, List<DrumPattern> patterns)
+    /// <summary>
+    /// Backward compatible: Creates a MIDI file from drum patterns only
+    /// </summary>
+    public void WriteToFile(List<DrumPattern> drumPatterns, string outputPath)
+    {
+        var drumTrack = MidiTrack.CreateDrumTrack("Weather Drums", drumPatterns.Cast<IMidiPattern>());
+        WriteToFile(outputPath, drumTrack);
+    }
+
+    /// <summary>
+    /// Backward compatible: Creates a MIDI file from drum and melody patterns
+    /// </summary>
+    public void WriteToFile(List<DrumPattern> drumPatterns, List<MelodyPattern>? melodyPatterns, 
+        string outputPath, int melodyChannel = 0, int melodyInstrument = 89)
+    {
+        var tracks = new List<MidiTrack>
+        {
+            MidiTrack.CreateDrumTrack("Weather Drums", drumPatterns.Cast<IMidiPattern>())
+        };
+
+        if (melodyPatterns != null && melodyPatterns.Count > 0)
+        {
+            tracks.Add(MidiTrack.CreateInstrumentTrack(
+                "Weather Melody", 
+                melodyChannel, 
+                melodyInstrument, 
+                melodyPatterns.Cast<IMidiPattern>()));
+        }
+
+        WriteToFile(outputPath, tracks.ToArray());
+    }
+
+    /// <summary>
+    /// Adds notes from a track's patterns to a MIDI track chunk
+    /// </summary>
+    private (int noteCount, long totalTicks) AddNotesToTrack(TrackChunk trackChunk, MidiTrack track)
     {
         using var notesManager = trackChunk.ManageNotes();
         
         int noteCount = 0;
         long currentPosition = 0;
 
-        foreach (var pattern in patterns)
+        foreach (var pattern in track.Patterns)
         {
-            foreach (var hit in pattern.Hits)
+            foreach (var midiNote in pattern.GetNotes())
             {
                 var note = new Note(
-                    (SevenBitNumber)hit.Note,
-                    hit.Duration,
-                    currentPosition + hit.TickPosition)
+                    (SevenBitNumber)midiNote.Note,
+                    midiNote.Duration,
+                    currentPosition + midiNote.TickPosition)
                 {
-                    Velocity = (SevenBitNumber)hit.Velocity,
-                    Channel = (FourBitNumber)DrumChannel
+                    Velocity = (SevenBitNumber)midiNote.Velocity,
+                    Channel = (FourBitNumber)midiNote.Channel
                 };
                 
                 notesManager.Objects.Add(note);
@@ -143,36 +160,6 @@ public class MidiFileWriter
             currentPosition += pattern.LengthTicks;
         }
 
-        return noteCount;
-    }
-
-    private int AddMelodyNotesToTrack(TrackChunk trackChunk, List<MelodyPattern> patterns)
-    {
-        using var notesManager = trackChunk.ManageNotes();
-        
-        int noteCount = 0;
-        long currentPosition = 0;
-
-        foreach (var pattern in patterns)
-        {
-            foreach (var melodyNote in pattern.Notes)
-            {
-                var note = new Note(
-                    (SevenBitNumber)melodyNote.Note,
-                    melodyNote.Duration,
-                    currentPosition + melodyNote.TickPosition)
-                {
-                    Velocity = (SevenBitNumber)melodyNote.Velocity,
-                    Channel = (FourBitNumber)melodyNote.Channel
-                };
-                
-                notesManager.Objects.Add(note);
-                noteCount++;
-            }
-
-            currentPosition += pattern.LengthTicks;
-        }
-
-        return noteCount;
+        return (noteCount, currentPosition);
     }
 }
