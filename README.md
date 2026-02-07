@@ -62,7 +62,7 @@ dotnet run -- --melody --instrument 49 --tempo 90 --hours 48 --bars 8 -o weather
 | `--instrument` | GM instrument number (0-127) | 89 (Pad 2) |
 | `-h, --help` | Show help | - |
 
-### Common GM Instruments for Ambient
+### Common General MIDI Instruments for Ambient
 
 | Number | Instrument |
 |--------|------------|
