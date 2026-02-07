@@ -92,7 +92,7 @@ public static class Scales
 /// <summary>
 /// Represents a single melodic note event
 /// </summary>
-public class MelodyNote
+public class MelodyNote : IMidiNote
 {
     /// <summary>
     /// MIDI note number (0-127)
@@ -132,7 +132,7 @@ public class MelodyNote
 /// <summary>
 /// A collection of melody notes representing a pattern (typically one bar)
 /// </summary>
-public class MelodyPattern
+public class MelodyPattern : IMidiPattern
 {
     public List<MelodyNote> Notes { get; set; } = new();
 
@@ -155,4 +155,9 @@ public class MelodyPattern
     /// Source weather data that generated this pattern
     /// </summary>
     public HourlyWeatherPoint? SourceWeather { get; set; }
+
+    /// <summary>
+    /// Returns all melody notes as IMidiNote
+    /// </summary>
+    public IEnumerable<IMidiNote> GetNotes() => Notes;
 }

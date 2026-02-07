@@ -20,7 +20,7 @@ public static class DrumNotes
 /// <summary>
 /// Represents a single drum hit event
 /// </summary>
-public class DrumHit
+public class DrumHit : IMidiNote
 {
     /// <summary>
     /// MIDI note number for the drum sound
@@ -42,6 +42,11 @@ public class DrumHit
     /// </summary>
     public int Velocity { get; set; }
 
+    /// <summary>
+    /// MIDI channel - always 9 (channel 10) for drums
+    /// </summary>
+    public int Channel => 9;
+
     public DrumHit(int note, long tickPosition, int velocity = 100, long duration = 120)
     {
         Note = note;
@@ -54,7 +59,7 @@ public class DrumHit
 /// <summary>
 /// A collection of drum hits representing a pattern (typically one bar)
 /// </summary>
-public class DrumPattern
+public class DrumPattern : IMidiPattern
 {
     public List<DrumHit> Hits { get; set; } = new();
     
@@ -67,4 +72,9 @@ public class DrumPattern
     /// Source weather data that generated this pattern
     /// </summary>
     public HourlyWeatherPoint? SourceWeather { get; set; }
+
+    /// <summary>
+    /// Returns all drum hits as IMidiNote
+    /// </summary>
+    public IEnumerable<IMidiNote> GetNotes() => Hits;
 }
