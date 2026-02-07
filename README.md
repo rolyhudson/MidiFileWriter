@@ -257,27 +257,28 @@ MIDI/
 │   └── WeatherService.cs      # Open-Meteo API client
 ├── Models/
 │   ├── WeatherData.cs         # API response models
+│   ├── IMidiPattern.cs        # Generic interfaces and MidiTrack class
 │   ├── DrumPattern.cs         # Drum hit and pattern classes
 │   └── MelodyPattern.cs       # Melody note, pattern, and scale classes
 ├── Mapping/
 │   ├── WeatherToDrumMapper.cs # Weather → drum pattern logic
 │   └── WeatherToMelodyMapper.cs # Weather → melody pattern logic
 └── Midi/
-    └── MidiFileWriter.cs      # DryWetMIDI file output
+    └── MidiFileWriter.cs      # Generic MIDI file output
 ```
 
 ---
 
-## Next Steps: Generalize MidiFileWriter
+## Architecture
 
-The current implementation has separate methods for drums and melody. A planned refactoring will make the writer fully generic to support any number of track types.
+The `MidiFileWriter` uses a generic, extensible design based on interfaces. Any pattern type can be written to a MIDI file by implementing `IMidiPattern`.
 
-### Proposed Architecture
+### Class Diagram
 
 ```mermaid
 classDiagram
     class IMidiNote {
-        &lt;&lt;interface&gt;&gt;
+        <<interface>>
         +int Note
         +long TickPosition
         +long Duration
@@ -286,9 +287,9 @@ classDiagram
     }
     
     class IMidiPattern {
-        &lt;&lt;interface&gt;&gt;
+        <<interface>>
         +long LengthTicks
-        +IEnumerable~IMidiNote~ GetNotes()
+        +GetNotes() IEnumerable~IMidiNote~
     }
     
     class MidiTrack {
@@ -296,6 +297,8 @@ classDiagram
         +int Channel
         +int? Instrument
         +List~IMidiPattern~ Patterns
+        +CreateDrumTrack()
+        +CreateInstrumentTrack()
     }
     
     DrumHit ..|> IMidiNote
@@ -307,28 +310,40 @@ classDiagram
     MidiTrack --> IMidiPattern
 ```
 
-### Planned Changes
-
-1. **New interfaces:** `IMidiNote` and `IMidiPattern` for common note/pattern behavior
-2. **MidiTrack class:** Encapsulates track name, channel, instrument, and patterns
-3. **Generic WriteToFile:** Single method accepting any number of tracks
+### Usage Example
 
 ```csharp
-// Future API
-var tracks = new[] {
-    new MidiTrack { Name = "Drums", Channel = 9, Patterns = drumPatterns },
-    new MidiTrack { Name = "Melody", Channel = 0, Instrument = 89, Patterns = melodyPatterns },
-    new MidiTrack { Name = "Bass", Channel = 1, Instrument = 33, Patterns = bassPatterns }
+// Build tracks using the generic MidiTrack API
+var tracks = new List<MidiTrack>
+{
+    MidiTrack.CreateDrumTrack("Drums", drumPatterns.Cast<IMidiPattern>()),
+    MidiTrack.CreateInstrumentTrack("Melody", channel: 0, instrument: 89, 
+        melodyPatterns.Cast<IMidiPattern>()),
+    MidiTrack.CreateInstrumentTrack("Bass", channel: 1, instrument: 33, 
+        bassPatterns.Cast<IMidiPattern>())
 };
 
-writer.WriteToFile("output.mid", tracks);
+var writer = new MidiFileWriter { Tempo = 120 };
+writer.WriteToFile("output.mid", tracks.ToArray());
 ```
 
 ### Benefits
 
-- **Extensible:** Add bass, lead, FX patterns without touching the writer
-- **Cleaner API:** Single method handles any combination of tracks
-- **Flexible:** Each track specifies its own channel and instrument
+- **Extensible:** Add bass, lead, FX patterns without modifying the writer
+- **Single API:** One `WriteToFile` method handles any number of tracks
+- **Flexible:** Each track specifies its own name, channel, and instrument
+- **Type-safe:** Interfaces ensure all patterns provide required MIDI data
+
+### Adding New Pattern Types
+
+To add a new pattern type (e.g., bass lines):
+
+1. Create a note class implementing `IMidiNote`
+2. Create a pattern class implementing `IMidiPattern`
+3. Create a mapper (e.g., `WeatherToBassMapper`)
+4. Add the track using `MidiTrack.CreateInstrumentTrack()`
+
+No changes to `MidiFileWriter` required!
 
 ---
 
