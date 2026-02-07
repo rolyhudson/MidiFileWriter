@@ -57,14 +57,24 @@ class Program
 
             Console.WriteLine();
 
-            // Write MIDI file
-            var writer = new MidiFileWriter
+            // Build tracks using the generic MidiTrack API
+            var tracks = new List<MidiTrack>
             {
-                Tempo = config.Tempo,
-                MelodyChannel = config.MelodyChannel,
-                MelodyInstrument = config.MelodyInstrument
+                MidiTrack.CreateDrumTrack("Weather Drums", drumPatterns.Cast<IMidiPattern>())
             };
-            writer.WriteToFile(drumPatterns, melodyPatterns, config.OutputFile);
+
+            if (melodyPatterns != null)
+            {
+                tracks.Add(MidiTrack.CreateInstrumentTrack(
+                    "Weather Melody",
+                    config.MelodyChannel,
+                    config.MelodyInstrument,
+                    melodyPatterns.Cast<IMidiPattern>()));
+            }
+
+            // Write MIDI file
+            var writer = new MidiFileWriter { Tempo = config.Tempo };
+            writer.WriteToFile(config.OutputFile, tracks.ToArray());
 
             Console.WriteLine();
             Console.WriteLine($"Done! Open '{config.OutputFile}' in your DAW or MIDI player.");
